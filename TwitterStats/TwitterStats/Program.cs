@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,9 +13,32 @@ namespace TwitterStats
 	{
 		static async Task Main(string[] args)
 		{
-			ITwitterStream twitterStream = new TwitterStream();
-			var producer = new Thread(new ParameterizedThreadStart(twitterStream.Start));
-			producer.Start(TwitterStream.GetTwitterStream());
+			//setup our DI
+			var serviceProvider = new ServiceCollection()
+				.AddLogging()
+				.AddSingleton<ITwitterStatisticsService, TwitterStatisticsService>()
+				.AddSingleton<ITwitterStreamService, TwitterStreamService>()
+				.BuildServiceProvider();
+
+			//configure logging
+			var loggerFactory =
+				LoggerFactory.Create(builder =>
+					builder.AddFile("app_{0:yyyy}-{0:MM}-{0:dd}.log", fileLoggerOpts =>
+					{
+						fileLoggerOpts.FormatLogFileName = fName => 
+						{
+							return string.Format(fName, DateTime.UtcNow);
+						};
+					}));
+
+			var logger = loggerFactory.CreateLogger<Program>();
+			logger.LogInformation("Starting application");
+
+			//do the actual work here
+			var twitterStatistics = serviceProvider.GetService<ITwitterStatisticsService>();
+			
+			var producer = new Thread(new ThreadStart(twitterStatistics.Start));
+			producer.Start();
 
 			char key = 's';
 			do
@@ -22,7 +47,7 @@ namespace TwitterStats
 				key = Console.ReadKey().KeyChar;
 				if (key == 'q')
 					break;
-				var tagUsage = await twitterStream.GetHashTagUsageAsync();
+				var tagUsage = await twitterStatistics.GetHashTagUsageAsync();
 				Console.Clear();
 
 				Console.WriteLine("Top 10 'English' Hash Tags:");
@@ -31,17 +56,17 @@ namespace TwitterStats
 					Console.WriteLine($"\tCount: {item.Key}; Hashtag: {item.Value}");
 				}
 				Console.WriteLine(@$"
-Errors:               {twitterStream.GlobalStats.ErrorCount};
-English:              {twitterStream.GlobalStats.English}; 
-NonEnglish:           {twitterStream.GlobalStats.NonEnglish};
-English /w Hashtags:  {twitterStream.GlobalStats.WithHashTags}; 
-English /wo Hashtags: {twitterStream.GlobalStats.WithNoHashTags};
+Errors:               {twitterStatistics.GlobalStats.ErrorCount};
+English:              {twitterStatistics.GlobalStats.English}; 
+NonEnglish:           {twitterStatistics.GlobalStats.NonEnglish};
+English /w Hashtags:  {twitterStatistics.GlobalStats.WithHashTags}; 
+English /wo Hashtags: {twitterStatistics.GlobalStats.WithNoHashTags};
 English Hashtags:     {tagUsage.Count}
 
 ");
 			} while (true);
 
-			twitterStream.Stop(); 
+			twitterStatistics.Stop(); 
 
 			while (producer.ThreadState != ThreadState.Stopped)
 				Thread.Sleep(100);

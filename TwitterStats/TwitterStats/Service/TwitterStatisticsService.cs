@@ -1,10 +1,8 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Configuration;
-using System.IO;
 using System.Linq;
-using System.Net;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TwitterStats.Dto;
@@ -12,9 +10,11 @@ using TwitterStats.Interface;
 
 namespace TwitterStats.Service
 {
-	public class TwitterStream : ITwitterStream
+	public class TwitterStatisticsService : ITwitterStatisticsService
 	{
 		private static readonly string BearerToken = ConfigurationManager.AppSettings["BearerToken"];
+		private readonly ITwitterStreamService twitterStreamService;
+
 		public bool IsRunning { get; protected set; }
 		private bool StopRequested;
 
@@ -22,23 +22,29 @@ namespace TwitterStats.Service
 
 		// For controlling access to TweetsToProcess
 		private System.Threading.SemaphoreSlim sync;
+		private ILogger<TwitterStatisticsService> _logger;
+
 		private Queue<TweetItem> TweetsToProcess { get; }
 
-		public TwitterStream()
+		public TwitterStatisticsService(ILoggerFactory loggerFactory, ITwitterStreamService twitterStreamService)
 		{
+			_logger = loggerFactory.CreateLogger<TwitterStatisticsService>();
+
+
 			TweetsToProcess = new Queue<TweetItem>();
 			IsRunning = false;
 			StopRequested = false;
 			sync = new System.Threading.SemaphoreSlim(1);
 			GlobalStats = new GlobalStats();
+			this.twitterStreamService = twitterStreamService;
 		}
 
 		public void Stop()
 		{ StopRequested = true; }
 
-		public void Start(object twitterStreamObject)
+		public void Start()
 		{
-			var twitterStream = twitterStreamObject as StreamReader;
+			var twitterStream = twitterStreamService.GetTwitterStream(BearerToken);
 			IsRunning = true;
 			while (!StopRequested)
 			{
@@ -58,19 +64,6 @@ namespace TwitterStats.Service
 			}
 
 			IsRunning = false;
-		}
-
-		/// <summary>
-		/// Gets a StreamReader where each line is a json tweet
-		/// </summary>
-		/// <returns></returns>
-		public static StreamReader GetTwitterStream()
-		{
-			var webRequest = (HttpWebRequest)WebRequest.Create("https://api.twitter.com/2/tweets/sample/stream?tweet.fields=entities,lang,created_at");
-			webRequest.Headers.Add(HttpRequestHeader.Authorization, $"Bearer {BearerToken}");
-			var resp = (HttpWebResponse)webRequest.GetResponse();
-
-			return new StreamReader(resp.GetResponseStream(), Encoding.UTF8);
 		}
 
 		/// <summary>
